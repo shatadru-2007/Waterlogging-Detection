@@ -1,0 +1,8 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+numpy
+scipy
+matplotlib
+rasterio
+requests
+scikit-learn   # only needed when you upload reported flood points

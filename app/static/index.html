@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waterlogging heatmap</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{--ink:#10263a;--muted:#5b6f80;--line:#d3dde4;--bg:#f2f6f8;--water:#0c6f7a;--water-d:#094f57;--warn:#9a5b00;--warn-bg:#fff4dc;--err:#a3281f;}
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{font:14px/1.45 "IBM Plex Sans",system-ui,sans-serif;color:var(--ink);background:var(--bg);display:flex}
+  aside{width:350px;flex:none;height:100%;overflow:auto;background:#fff;border-right:1px solid var(--line);padding:18px 18px 28px}
+  main{flex:1;position:relative;min-width:0}
+  #map{position:absolute;inset:0}
+  h1{font-size:19px;margin:0 0 2px;font-weight:600}
+  .sub{color:var(--muted);margin:0 0 16px}
+  fieldset{border:0;padding:0;margin:0 0 14px}
+  legend{font-weight:600;padding:0;margin-bottom:6px}
+  label{display:block;color:var(--muted);font-size:12.5px;margin:8px 0 2px}
+  input[type=number],input[type=text],select{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:5px;font:inherit;color:var(--ink);background:#fff}
+  input:focus-visible,button:focus-visible,select:focus-visible{outline:2px solid var(--water);outline-offset:1px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .hint{color:var(--muted);font-size:12px;margin:3px 0 0}
+  .check{display:flex;gap:8px;align-items:center;color:var(--ink);font-size:13px;margin-top:10px}
+  .check input{margin:0}
+  button.run{width:100%;margin-top:6px;padding:10px;border:0;border-radius:6px;background:var(--water);color:#fff;font:600 14px inherit;cursor:pointer}
+  button.run:hover{background:var(--water-d)}
+  button.run:disabled{background:#8fb3b8;cursor:progress}
+  #status{margin-top:10px;color:var(--muted);min-height:20px}
+  #prog{display:none;margin-top:12px}
+  .track{height:10px;background:var(--line);border-radius:5px;overflow:hidden}
+  #fill{height:100%;width:0;background:var(--water);border-radius:5px;transition:width .5s ease}
+  #stage{display:flex;justify-content:space-between;gap:8px;margin-top:5px;font-size:12.5px;color:var(--muted)}
+  #status.err{color:var(--err)}
+  .warn{background:var(--warn-bg);color:var(--warn);border-radius:5px;padding:7px 9px;margin:6px 0;font-size:12.5px}
+  #results{display:none}
+  .layer{display:flex;gap:8px;align-items:center;padding:5px 0;color:var(--ink);font-size:13.5px;margin:0}
+  .layer input{margin:0}
+  .legend{margin:12px 0 4px}
+  .bar{height:12px;border-radius:3px}
+  .ends{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin-top:2px}
+  dl{margin:8px 0 0;display:grid;grid-template-columns:auto auto;gap:3px 12px;font-size:13px}
+  dt{color:var(--muted)} dd{margin:0;text-align:right}
+  pre{white-space:pre-wrap;font:12px/1.5 inherit;background:var(--bg);border-radius:5px;padding:8px 10px;margin:6px 0}
+  input[type=range]{width:100%}
+  button.ghost{margin-top:6px;padding:6px 10px;border:1px solid var(--water);border-radius:5px;background:#fff;color:var(--water-d);font:500 12.5px inherit;cursor:pointer}
+  button.ghost:hover{background:var(--bg)}
+  .place,.hotrow{display:flex;gap:6px;align-items:stretch;margin:4px 0}
+  .place button.go,.hotrow button{flex:1;text-align:left;padding:6px 9px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font:inherit;font-size:12.5px;cursor:pointer}
+  .place button.go:hover,.hotrow button:hover{border-color:var(--water);background:var(--bg)}
+  .place button.x{width:28px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--muted);cursor:pointer}
+  .place button.x:hover{color:var(--err);border-color:var(--err)}
+  .hotpin{background:#fff;border:2px solid #c0392b;color:#c0392b;border-radius:50%;font:600 11px/18px "IBM Plex Sans",sans-serif;text-align:center}
+  .dlink{display:block;padding:4px 0;color:var(--water-d);font-size:13px}
+  @media (max-width:760px){body{flex-direction:column-reverse}aside{width:100%;height:55%;border-right:0;border-top:1px solid var(--line)}main{height:45%;flex:none}}
+</style>
+</head>
+<body>
+<aside>
+  <h1>Waterlogging heatmap</h1>
+  <p class="sub">Click the map to choose a centre, then run the analysis.</p>
+
+  <fieldset>
+    <legend>Area</legend>
+    <div class="row">
+      <div><label for="lat">Latitude</label><input id="lat" type="number" step="0.0001" value="23.52"></div>
+      <div><label for="lon">Longitude</label><input id="lon" type="number" step="0.0001" value="87.31"></div>
+    </div>
+    <label for="radius">Radius (km, up to 5)</label>
+    <input id="radius" type="number" min="0.2" max="5" step="0.1" value="1">
+    <p class="hint">Larger areas take longer; the first run for an area downloads data, later runs reuse the cache.</p>
+  </fieldset>
+
+  <fieldset id="placesbox" hidden>
+    <legend>Recent places (cached)</legend>
+    <div id="places"></div>
+    <p class="hint">Reopening a cached place skips the downloads. Use the x to delete its cached data.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Storm and drainage</legend>
+    <label for="rain">Rainfall scenarios (cm, comma separated)</label>
+    <input id="rain" type="text" value="5, 10, 20">
+    <button type="button" class="ghost" id="fc">Use forecast peak (next 3 days)</button>
+    <p class="hint" id="fctxt"></p>
+    <div class="row">
+      <div><label for="dur">Storm duration (h)</label><input id="dur" type="number" min="0.5" step="0.5" value="3"></div>
+      <div><label for="drain">Drain capacity (mm/h)</label><input id="drain" type="number" min="0" step="1" value="10"></div>
+    </div>
+    <p class="hint">Drain capacity is an assumption. Replace it with a local design value.</p>
+    <label for="roadfrac">Major roads act as drains at (0 to 1)</label>
+    <input id="roadfrac" type="number" min="0" max="1" step="0.1" value="0.5">
+  </fieldset>
+
+  <fieldset>
+    <legend>Sentinel-2 image</legend>
+    <label class="check" for="s2on"><input id="s2on" type="checkbox" checked> Fetch a satellite image</label>
+    <div class="row">
+      <div><label for="s2cloud">Max cloud cover (%)</label><input id="s2cloud" type="number" min="0" max="100" step="5" value="10"></div>
+      <div><label for="s2days">Look back (days)</label><input id="s2days" type="number" min="7" max="1095" step="1" value="365"></div>
+    </div>
+    <label for="s2prefer">Pick the scene</label>
+    <select id="s2prefer"><option value="clearest">Clearest sky</option><option value="latest">Most recent</option></select>
+    <p class="hint">Cloud cover is measured over the whole ~110 km scene, not just your area. The image is a background layer only and does not change the heatmap. Turn it off to skip the download.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Check against reports (optional)</legend>
+    <label for="csv">CSV with lat, lon and optional label (1 = flooded, 0 = dry)</label>
+    <input id="csv" type="file" accept=".csv,text/csv">
+    <label class="check" for="usecal"><input id="usecal" type="checkbox"> Use layer weights fitted to these points</label>
+  </fieldset>
+
+  <button id="go" class="run">Run analysis</button>
+  <div id="prog"><div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" id="track"><div id="fill"></div></div><div id="stage"><span id="stagetxt"></span><span id="pct"></span></div></div>
+  <div id="status" role="status"></div>
+
+  <section id="results">
+    <div id="warnings"></div>
+    <fieldset>
+      <legend>Map layer</legend>
+      <div id="layers"></div>
+      <label for="op">Opacity</label>
+      <input id="op" type="range" min="0.1" max="1" step="0.05" value="0.8">
+      <div class="legend"><div id="bar" class="bar"></div><div class="ends"><span id="lo">0</span><span id="hi"></span></div></div>
+      <p class="hint" id="legendnote"></p>
+    </fieldset>
+    <fieldset>
+      <legend>Area summary</legend>
+      <dl id="stats"></dl>
+    </fieldset>
+    <fieldset>
+      <legend>Top hotspots</legend>
+      <p class="hint" id="exptxt"></p>
+      <div id="hotlist"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Download</legend>
+      <div id="dl"></div>
+    </fieldset>
+    <fieldset id="evalbox" hidden>
+      <legend>Evaluation</legend>
+      <pre id="evaltxt"></pre>
+    </fieldset>
+  </section>
+</aside>
+<main><div id="map"></div></main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const TURBO = "#30123b,#4662d7,#36aaf9,#1ae4b6,#72fe5e,#c7ef34,#faba39,#f66b19,#ca2a04,#7a0403";
+const MAGMA = "#000004,#3b0f70,#8c2981,#de4968,#fe9f6d,#fcfdbf";
+
+const map = L.map("map").setView([23.52, 87.31], 14);
+const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 19, attribution: "© OpenStreetMap"}).addTo(map);
+const esri = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {maxZoom: 19, attribution: "Esri World Imagery"});
+L.control.layers({"Streets": osm, "Satellite": esri}, null, {position: "topright"}).addTo(map);
+
+const centre = L.marker([23.52, 87.31], {draggable: true}).addTo(map);
+const ring = L.circle([23.52, 87.31], {radius: 1000, color: "#c0392b", weight: 2, fillOpacity: 0}).addTo(map);
+let overlays = [], flood = null, hot = null, current = null;
+
+function setCentre(lat, lon, pan) {
+  $("lat").value = (+lat).toFixed(4); $("lon").value = (+lon).toFixed(4);
+  centre.setLatLng([lat, lon]); ring.setLatLng([lat, lon]);
+  if (pan) map.panTo([lat, lon]);
+}
+function syncRing() { ring.setRadius(Math.min(5, Math.max(0.2, +$("radius").value || 1)) * 1000); }
+map.on("click", e => setCentre(e.latlng.lat, e.latlng.lng));
+centre.on("dragend", () => { const p = centre.getLatLng(); setCentre(p.lat, p.lng); });
+["lat", "lon"].forEach(id => $(id).addEventListener("change", () => setCentre(+$("lat").value, +$("lon").value, true)));
+$("radius").addEventListener("input", syncRing);
+$("s2on").addEventListener("change", () => ["s2cloud", "s2days", "s2prefer"].forEach(id => $(id).disabled = !$("s2on").checked));
+$("op").addEventListener("input", () => overlays.forEach(o => o.setOpacity(+$("op").value)));
+
+function parseCsv(text) {
+  const rows = text.trim().split(/\r?\n/).map(r => r.split(",").map(s => s.trim()));
+  const head = rows[0].map(s => s.toLowerCase());
+  const hasHead = head.some(h => isNaN(+h));
+  const ix = n => hasHead ? head.indexOf(n) : -1;
+  const li = hasHead ? ix("lat") : 0, oi = hasHead ? (ix("lon") >= 0 ? ix("lon") : ix("lng")) : 1, yi = hasHead ? ix("label") : 2;
+  if (li < 0 || oi < 0) throw new Error("CSV needs lat and lon columns.");
+  return rows.slice(hasHead ? 1 : 0).filter(r => r.length > 1 && !isNaN(+r[li]) && !isNaN(+r[oi]))
+    .map(r => ({lat: +r[li], lon: +r[oi], label: yi >= 0 && r[yi] !== undefined && r[yi] !== "" ? +r[yi] : 1}));
+}
+
+function show(i) {
+  overlays.forEach((o, k) => o.setOpacity(k === i ? +$("op").value : 0));
+  const l = current.layers[i];
+  $("bar").style.background = `linear-gradient(90deg,${l.ramp})`;
+  $("lo").textContent = "0"; $("hi").textContent = l.max;
+  $("legendnote").textContent = l.note;
+}
+
+function render(r) {
+  overlays.forEach(o => map.removeLayer(o)); overlays = [];
+  if (flood) { map.removeLayer(flood); flood = null; }
+  if (hot) { map.removeLayer(hot); hot = null; }
+  const layers = r.scenarios.map(s => ({
+    name: `${s.rain_cm} cm rain`, image: s.image, ramp: TURBO, max: `${r.vmax.toFixed(0)} mm`,
+    note: "Susceptibility times runoff left after drainage, on one shared scale across scenarios."}));
+  layers.push({name: `Robust hotspots (${r.robust.rain_cm} cm)`, image: r.robust.image, ramp: MAGMA, max: "100%",
+    note: `Share of 30 runs with varied weights, soil, drain capacity and drains on/off where a cell is in the top 10%. ${r.robust.pct_ge80.toFixed(1)}% of land cells are hotspots in at least 80% of runs.`});
+  layers.forEach(l => overlays.push(L.imageOverlay(l.image, r.bounds, {opacity: 0, interactive: false}).addTo(map)));
+  if (r.satellite) {
+    const si = r.satellite_info;
+    const note = si ? `Scene from ${si.date}${si.cloud != null ? `, ${si.cloud.toFixed(1)}% cloud cover` : ""}. Limit ${si.max_cloud}%; ${si.prefer === "latest" ? "most recent" : "clearest"} scene in the window.`
+                    : "Sentinel-2 true colour.";
+    layers.push({name: "Sentinel-2 true colour", image: r.satellite, ramp: "#fff,#fff", max: "", note});
+    overlays.push(L.imageOverlay(r.satellite, r.bounds, {opacity: 0, interactive: false}).addTo(map));
+  }
+  current = {layers};
+  $("layers").innerHTML = layers.map((l, i) =>
+    `<label class="layer"><input type="radio" name="layer" value="${i}" ${i === 0 ? "checked" : ""}>${l.name}</label>`).join("");
+  document.querySelectorAll("input[name=layer]").forEach(el => el.addEventListener("change", () => show(+el.value)));
+  show(0);
+  map.fitBounds(r.bounds, {padding: [20, 20]});
+
+  const s = r.stats;
+  $("stats").innerHTML = [
+    ["Grid", `${s.grid[1]} × ${s.grid[0]} cells`], ["Soil group", s.soil_group], ["Land cells", s.land_cells],
+    ["Mapped drains", `${s.drains_km_per_km2} km/km²`], ["Major roads", `${s.major_roads_km_per_km2} km/km²`],
+    ["Underpass cells", s.underpass_cells],
+    ["From cache", r.cache.result ? "full result" : `${r.cache.layers.length} of ${r.cache.total} layers${r.cache.features ? " + terrain" : ""}`]].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  $("warnings").innerHTML = r.warnings.map(w => `<div class="warn"></div>`).join("");
+  [...$("warnings").children].forEach((el, i) => el.textContent = r.warnings[i]);
+  $("evalbox").hidden = !r.evaluation;
+  if (r.evaluation) {
+    $("evaltxt").textContent = r.evaluation.lines.join("\n");
+    flood = L.layerGroup(r.evaluation.points.map(p => L.circleMarker(p, {radius: 4, color: "#000", weight: 1, fillColor: "#19d3f3", fillOpacity: 1}))).addTo(map);
+  }
+  renderHotspots(r);
+  $("results").style.display = "block";
+}
+
+function renderHotspots(r) {
+  const e = r.exposure, parts = [`Robust hotspots cover ${e.hotspot_ha} ha.`];
+  if (e.bld_pct != null) parts.push(`${e.bld_pct}% of mapped building area lies within about 30 m of one.`);
+  if (e.road_pct != null) parts.push(`${e.road_km} km of mapped roads (${e.road_pct}%) pass through or next to them.`);
+  $("exptxt").textContent = parts.join(" ");
+  const box = $("hotlist");
+  box.textContent = "";
+  hot = L.layerGroup().addTo(map);
+  if (!r.hotspots.length) box.textContent = "No cluster of robust hotspots was found for this run.";
+  r.hotspots.forEach(h => {
+    L.marker([h.lat, h.lon], {icon: L.divIcon({className: "hotpin", html: String(h.rank), iconSize: [22, 22]}), interactive: false}).addTo(hot);
+    const row = document.createElement("div"), b = document.createElement("button");
+    row.className = "hotrow";
+    b.textContent = `#${h.rank}  ${h.area_m2.toLocaleString()} m², avg ${h.mean_mm} mm, ${h.bld_m2.toLocaleString()} m² of buildings, ${h.road_m.toLocaleString()} m of road nearby`;
+    b.addEventListener("click", () => map.flyTo([h.lat, h.lon], Math.max(map.getZoom(), 17)));
+    row.appendChild(b); box.appendChild(row);
+  });
+  const base = `/api/export/${r.export_id}/`;
+  const files = r.scenarios.map((s, i) => [`Heat, ${s.rain_cm} cm rain (GeoTIFF, mm)`, `heat_${i}.tif`])
+    .concat([["Robust hotspots (GeoTIFF, 0 to 1)", "robust.tif"], ["Hotspot outlines (GeoJSON)", "hotspots.geojson"], ["Hotspot list (CSV)", "hotspots.csv"]]);
+  $("dl").innerHTML = files.map(([t, f]) => `<a class="dlink" href="${base}${f}" download>${t}</a>`).join("");
+}
+
+async function loadPlaces() {
+  try {
+    const ps = await (await fetch("/api/places")).json();
+    const box = $("places");
+    box.textContent = "";
+    $("placesbox").hidden = !ps.length;
+    ps.forEach(p => {
+      const row = document.createElement("div"), go = document.createElement("button"), x = document.createElement("button");
+      row.className = "place"; go.className = "go"; x.className = "x";
+      go.textContent = `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}, ${p.radius_km} km (${p.layers} layers${p.terrain ? " + terrain" : ""}, ${p.mb} MB)`;
+      x.textContent = "×"; x.title = "Delete this place's cached data"; x.setAttribute("aria-label", "Delete cached data for this place");
+      go.addEventListener("click", () => { $("radius").value = p.radius_km; syncRing(); setCentre(p.lat, p.lon, true); });
+      x.addEventListener("click", async () => { await fetch("/api/places/" + encodeURIComponent(p.area), {method: "DELETE"}); loadPlaces(); });
+      row.append(go, x); box.appendChild(row);
+    });
+  } catch (e) { /* the list is a convenience; ignore errors */ }
+}
+
+$("fc").addEventListener("click", async () => {
+  const t = $("fctxt");
+  t.textContent = "Fetching forecast...";
+  try {
+    const r = await fetch(`/api/forecast?lat=${$("lat").value}&lon=${$("lon").value}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || "Forecast failed.");
+    if (j.peak_3h_cm <= 0) { t.textContent = `No measurable rain in the next ${Math.round(j.hours / 24)} days (${j.source}). Use the manual scenarios instead.`; return; }
+    $("rain").value = j.peak_3h_cm; $("dur").value = 3;
+    t.textContent = `Forecast peak: ${j.peak_3h_cm} cm in 3 h, ${j.peak_24h_cm} cm in 24 h (${j.source}). Rainfall set to the 3 h peak, duration 3 h.`;
+  } catch (e) { t.textContent = e.message; }
+});
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function setProgress(pct, text) {
+  $("prog").style.display = "block";
+  $("fill").style.width = pct + "%"; $("track").setAttribute("aria-valuenow", pct);
+  $("stagetxt").textContent = text; $("pct").textContent = Math.round(pct) + "%";
+}
+
+$("go").addEventListener("click", async () => {
+  const st = $("status"), btn = $("go");
+  st.className = ""; st.textContent = "";
+  btn.disabled = true;
+  try {
+    const rain = $("rain").value.split(",").map(s => parseFloat(s)).filter(v => v > 0);
+    if (!rain.length) throw new Error("Enter at least one rainfall value in cm.");
+    let pts = [];
+    const f = $("csv").files[0];
+    if (f) pts = parseCsv(await f.text());
+    setProgress(0, "Starting");
+    const res = await fetch("/api/run", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({
+      lat: +$("lat").value, lon: +$("lon").value, radius_km: +$("radius").value, rain_cm: rain, duration_h: +$("dur").value,
+      drain_mm_h: +$("drain").value, road_drain_frac: +$("roadfrac").value, flood_points: pts, use_calibrated: $("usecal").checked,
+      s2_enabled: $("s2on").checked, s2_max_cloud: Math.round(+$("s2cloud").value), s2_lookback_days: Math.round(+$("s2days").value),
+      s2_prefer: $("s2prefer").value})});
+    const start = await res.json();
+    if (!res.ok) throw new Error("Check the inputs: " + JSON.stringify(start.detail?.[0]?.loc?.slice(1) || ""));
+    let job;
+    for (;;) {
+      const r = await fetch("/api/job/" + start.job_id);
+      job = await r.json();
+      if (!r.ok) throw new Error(job.detail || "Lost track of the analysis.");
+      if (job.status !== "running") break;
+      setProgress(job.pct, job.stage);
+      await sleep(600);
+    }
+    if (job.status === "error") throw new Error(job.error);
+    setProgress(100, "Done");
+    render(job.result);
+    st.textContent = "Done.";
+    loadPlaces();
+    setTimeout(() => { $("prog").style.display = "none"; }, 1500);
+  } catch (e) { $("prog").style.display = "none"; st.className = "err"; st.textContent = e.message; }
+  finally { btn.disabled = false; }
+});
+syncRing();
+loadPlaces();
+</script>
+</body>
+</html>
